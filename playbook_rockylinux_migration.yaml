@@ -1,0 +1,91 @@
+---
+- name: Migrate CentOS 7 to Rocky Linux 8
+  hosts: centos
+  become: yes
+
+#Обновление ОС
+  tasks:
+  - name: Change repository into yum.repos.d from mirror.centos.org to vault.centos.org
+    shell:
+      "sed -i s/mirror.centos.org/vault.centos.org/g /etc/yum.repos.d/CentOS-*.repo"
+
+  - name: Change baseurl into yum.repos.d
+    shell:
+      "sed -i s/^#.*baseurl=http/baseurl=http/g /etc/yum.repos.d/CentOS-*.repo"
+
+  - name: Change mirrorlist into yum.repos.d
+    shell:
+      "sed -i s/^mirrorlist=http/#mirrorlist=http/g /etc/yum.repos.d/CentOS-*.repo"
+
+  - name: Upgrade all packages CentOS 7
+    ansible.builtin.yum:
+      name: "*"
+      state: latest
+      update_cache: yes
+    when:
+      - ansible_os_family == "RedHat"
+      - ansible_distribution == "CentOS"
+
+  - name: Reboot system
+    ansible.builtin.reboot:
+      msg: "Reboot init by Ansible playbook upgrade CentOS 7 to Rocky Linux 8"
+
+#Установка пакетов, подготовка к установке обновления до rocky linux 8
+
+  - name: Install Elevator
+    shell:
+      "yum install -y http://repo.almalinux.org/elevate/elevate-release-latest-el$(rpm --eval %rhel).noarch.rpm"
+    ignore_errors: true
+
+  - name: Install leap_upgrade
+    ansible.builtin.yum:
+      name: leapp-upgrade
+      state: present
+      update_cache: yes
+
+  - name: Install leapp-data-rocky
+    ansible.builtin.yum:
+      name: leapp-data-rocky
+      state: present
+      update_cache: yes
+
+  - name: Delete pata_acpi module
+    community.general.modprobe:
+      name: pata_acpi
+      state: absent
+
+  - name: Add root login via ssh
+    ansible.builtin.lineinfile:
+      path: /etc/ssh/sshd_config
+      line: PermitRootLogin yes
+
+  - name: Leap preupgrade for creating required files
+    shell:
+      "leapp preupgrade"
+    ignore_errors: true
+
+  - name: Confirm the removal of the PAM PKCS11 module
+    shell:
+      "leapp answer --section remove_pam_pkcs11_module_check.confirm=True"
+
+  - name: Replace line in answer file
+    ansible.builtin.lineinfile:
+      path: /var/log/leapp/answerfile
+      line: "confirm = yes"
+      state: present
+
+  - name: Confirm the removal of the PAM PKCS11 module
+    shell:
+      "leapp answer --section remove_pam_pkcs11_module_check.confirm=True"
+
+# Обновление до rocky linux 8
+
+  - name: Upgrade CentOS 7 to Rocky Linux 8
+    shell:
+      "sudo leapp upgrade"
+    ignore_errors: true
+
+  - name: Reboot system after upgrading
+    ansible.builtin.reboot:
+      reboot_timeout: 900
+      msg: "Reboot init by Ansible playbook upgrade CentOS 7 to Rocky Linux 8"
